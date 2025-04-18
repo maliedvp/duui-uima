@@ -26,6 +26,11 @@ function deserialize(inputCas, inputStream)
         _speaker:setBegin(speaker["begin"])
         _speaker:setEnd(speaker["end"])
         _speaker:setLabel(speaker["label"]);
+        _speaker:setFirstname(speaker["firstname"])
+        _speaker:setName(speaker["name"])
+        _speaker:setName(speaker["title"])
+        _speaker:setName(speaker["role"])
+        _speaker:setName(speaker["party"])
         _speaker:addToIndexes()
 
     end

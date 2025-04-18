@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List, Optional, Dict, Union
 import logging
 from time import time
@@ -9,6 +9,7 @@ from cassis import load_typesystem
 import time
 from starlette.responses import PlainTextResponse, JSONResponse
 import warnings
+import re
 
 
 
@@ -21,6 +22,8 @@ class Settings(BaseSettings):
     # Log level
     log_level: str
 
+    model_config = SettingsConfigDict(env_file=".env")
+
 
 # Speech
 class Speech(BaseModel):
@@ -30,9 +33,17 @@ class Speech(BaseModel):
 
 # Speaker
 class Speaker(BaseModel):
+    """
+    Has to be in line with the features frim the typesystem
+    """
     begin: int
     end: int
     label: str
+    firstname: Optional[str] = None
+    name: Optional[str] = None
+    title: Optional[str] = None
+    role: Optional[str] = None
+    party: Optional[str] = None
 
 
 
@@ -42,7 +53,7 @@ logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger(__name__)
 
 # Load the predefined typesystem that is needed for this annotator to work
-typesystem_filename = 'typesystem.xml'
+typesystem_filename = '../resources/typesystem.xml'
 logger.debug("Loading typesystem from \"%s\"", typesystem_filename)
 with open(typesystem_filename, 'rb') as f:
     typesystem = load_typesystem(f)
@@ -153,27 +164,71 @@ def get_input_output() -> JSONResponse:
 # Process request from DUUI
 @app.post("/v1/process")
 def post_process(request: DUUIRequest):
+    import re
 
-    text = request.text
+    # Step 1: flatten line breaks
+    text = re.sub(r'\s*\n\s*', ' ', request.text)
+
+    pattern = re.compile(
+        r"""
+        (?:
+            (?P<title>Dr\.|Prof\.)\s*                # optional academic title (Dr., Prof.)
+            (?P<speaker_name>[A-ZÄÖÜ][a-zäöüß]+)     # proper surname
+            ,\s*
+            (?P<role>                                 
+                (?:[A-ZÄÖÜa-zäöüß(),\-]+\s*){1,10}    # role: 1–10 words max
+            )
+            :
+        )
+        |
+        (?:
+            (?P<president>Präsident(?:in)?)          # Präsident or Präsidentin
+            :
+        )
+        """,
+        re.VERBOSE
+    )
+
+
     speeches = []
-    speaker = []
+    speakers = []
 
-    # doing all the magic
-    # filling all the two arrays with Objects...
+    for match in pattern.finditer(text):
+        begin = match.start()
+        end = match.end()
 
-    speeches.append(Speech(
-        begin=0,
-        end=200
-    ))
+        if match.group("speaker_name"):
+            name = match.group("speaker_name")
+            role = match.group("role").strip()
+            title = match.group("title") or None
+            label = f"{title + ' ' if title else ''}{name}, {role}"
+        elif match.group("president"):
+            name = match.group("president")
+            role = "Präsident"
+            title = None
+            label = "Präsident"
 
-    speaker.append(Speaker(
-        begin=0,
-        end=50,
-        label="Max Mustermann"
-    ))
+        speakers.append(Speaker(
+            begin=begin,
+            end=end,
+            label=label,
+            firstname=None,
+            name=name,
+            title=title,
+            role=role,
+            party=None
+        ))
 
-    # Return data as JSON
+        next_match = next(pattern.finditer(text, end), None)
+        speech_end = next_match.start() if next_match else len(text)
+
+        speeches.append(Speech(
+            begin=end,
+            end=speech_end,
+            speaker=len(speakers) - 1
+        ))
+
     return DUUIResponse(
-        speeches = speeches,
-        speakers = speaker
+        speeches=speeches,
+        speakers=speakers
     )
