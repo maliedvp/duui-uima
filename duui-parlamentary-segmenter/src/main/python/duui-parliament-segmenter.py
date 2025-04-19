@@ -10,7 +10,9 @@ import time
 from starlette.responses import PlainTextResponse, JSONResponse
 import warnings
 import re
-
+from mp import get_mp
+import pandas as pd
+import difflib
 
 
 class Settings(BaseSettings):
@@ -29,6 +31,7 @@ class Settings(BaseSettings):
 class Speech(BaseModel):
     begin: int
     end: int
+    speaker: int
 
 
 # Speaker
@@ -41,10 +44,45 @@ class Speaker(BaseModel):
     label: str
     firstname: Optional[str] = None
     name: Optional[str] = None
+    nobility: Optional[str] = None
     title: Optional[str] = None
     role: Optional[str] = None
     party: Optional[str] = None
+    party_deducted: Optional[str] = None
+    electoral_county: Optional[str] = None
+    electoral_county_deducted: Optional[str] = None
 
+
+def find_mp(speaker: Speaker, mp_df: pd.DataFrame, threshold: float = 0.8) -> Speaker:
+    """
+    Enriches a Speaker object with party and electoral_county
+    by matching speaker.name against mp_df.family_name,
+    falling back to a fuzzy match if needed.
+    """
+    if not speaker.name:
+        speaker.party = None
+        speaker.electoral_county = None
+        return speaker
+
+    name_lower = speaker.name.lower()
+    # 1) Exact match
+    mask_exact = mp_df["family_name"].str.lower() == name_lower
+    if mask_exact.any():
+        row = mp_df.loc[mask_exact].iloc[0]
+    else:
+        # 2) Fuzzy fallback
+        candidates = mp_df["family_name"].dropna().unique().tolist()
+        closest = difflib.get_close_matches(speaker.name, candidates, n=1, cutoff=threshold)
+        if not closest:
+            speaker.party = None
+            speaker.electoral_county = None
+            return speaker
+        mask_fuzzy = mp_df["family_name"].str.lower() == closest[0].lower()
+        row = mp_df.loc[mask_fuzzy].iloc[0]
+
+    speaker.party_deducted = row.get("Partei") or None
+    speaker.electoral_county_deducted = row.get("Wahlkreis") or None
+    return speaker
 
 
 # Load settings from env vars
@@ -160,75 +198,171 @@ def get_input_output() -> JSONResponse:
     return JSONResponse(content=json_compatible_item_data)
 
 
-
-# Process request from DUUI
 @app.post("/v1/process")
 def post_process(request: DUUIRequest):
     import re
 
-    # Step 1: flatten line breaks
-    text = re.sub(r'\s*\n\s*', ' ', request.text)
+    text = request.text
 
+    # Get list of members of parliament for respective legislative period
+    mp_df = get_mp(legislative_period=2) # has to be adjusted
+
+    # Improved regex pattern with anchors and optional parts
     pattern = re.compile(
         r"""
+        ^\s*
         (?:
-            (?P<title>Dr\.|Prof\.)\s*                # optional academic title (Dr., Prof.)
-            (?P<speaker_name>[A-ZÄÖÜ][a-zäöüß]+)     # proper surname
-            ,\s*
-            (?P<role>                                 
-                (?:[A-ZÄÖÜa-zäöüß(),\-]+\s*){1,10}    # role: 1–10 words max
-            )
+            (?P<trash1>[^A-ZÄÖÜa-zäöüß]*) # trash
+            (?P<firstname>[A-ZÄÖÜ]\.)?\s*? # Initial of first name
+            (?P<title>[Dv]r\.|Prof\.)?\s*?  # Optional title
+            (?P<nobility>(Graf)?(Freiherr)?\s?v?\.?)?\s*? # Optional nobility indication
+            (?P<name>[A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)?)\s*  # Name
+            (?:
+              \(\s*(?P<party>[A-ZÄÖÜa-zäöüß]{,5})\s*\)   # “(Party)”
+              \s*,\s*                                 # comma + optional space
+            )?
+            (?:
+              \(\s*(?P<wkr>[A-ZÄÖÜa-zäöüß]{6,})\s*\)   # “(Wahlkreis)”
+              \s*,\s*                                 # comma + optional space
+            )?
+            (?P<trash2>.{,20}) # trash
+            (?P<role>Abgeordneter(?:in)?(?:,\sBerichterstatter)?)  # Role
             :
-        )
         |
-        (?:
-            (?P<president>Präsident(?:in)?)          # Präsident or Präsidentin
+            (?P<trash_ap>[^A-ZÄÖÜa-zäöüß]*) # trash
+            (?P<alt_label>Alterspräsident(?:in)?)\s*
+            (?P<title_ap>Dr\.|Prof\.)?\s*?  # Optional title
+            (?P<name_ap>[A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)?)\s*  # Name
+            :
+        |
+            (?P<trash_p>[^A-ZÄÖÜa-zäöüß]*) # trash
+            (?P<president>Präsident(?:in)?)\s*:
+        |
+            (?P<trash_vp>[^A-ZÄÖÜa-zäöüß]*) # trash
+            (?P<vicepresident>Vizepräsident(?:in)?)\s*
+            (?P<title_vp>[Dv]r\.|Prof\.)?\s*?  # Optional title
+            (?P<name_vp>[A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)?)\s*  # Name
+            :
+        |
+            (?P<trash_bc>[^A-ZÄÖÜa-zäöüß]*) # trash
+            (?P<title_bc>[Dv]r\.|Prof\.)?\s*?  # Optional title
+            (?P<nobility_bc>(Graf)?\s?v?\.?)?\s*? # Optional nobility indication
+            (?P<name_bc>[A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)?)\s*  # Name
+            ,\s*?
+            (?P<role_bc>[^:]{,100}?)\s*  # Role
             :
         )
         """,
-        re.VERBOSE
+        re.VERBOSE | re.MULTILINE
     )
 
+    def _get(group: str) -> Optional[str]:
+        val = match.group(group)
+        if val is None:
+            return None
+        # strip leading/trailing whitespace
+        val = re.sub(r'^\s+|\s+$', '', val)
+        val = re.sub(r'\n', ' ', val)
+        return val if val else None
 
-    speeches = []
-    speakers = []
+    speeches: list[Speech] = []
+    speakers: list[Speaker] = []
 
-    for match in pattern.finditer(text):
-        begin = match.start()
-        end = match.end()
+    matches = list(pattern.finditer(text))
 
-        if match.group("speaker_name"):
-            name = match.group("speaker_name")
-            role = match.group("role").strip()
-            title = match.group("title") or None
-            label = f"{title + ' ' if title else ''}{name}, {role}"
+    for i, match in enumerate(matches):
+        begin, end = match.span()
+
+        # Standard Abgeordneter
+        if match.group("name"):
+            speaker = Speaker(
+                begin=begin,
+                end=end,
+                label=f"{_get('name')}, {_get('role')}",
+                firstname=_get("firstname"),
+                name=_get("name"),
+                nobility=_get("nobility"),
+                title=_get("title"),
+                role=_get("role"),
+                party=_get("party"),
+                electoral_county=_get("wkr")
+            )
+
+            speaker = find_mp(speaker=speaker, mp_df=mp_df)
+
+        # Alterspräsident(in)
+        elif match.group("alt_label"):
+            speaker = Speaker(
+                begin=begin,
+                end=end,
+                label=_get("alt_label"),
+                firstname=None,
+                name=_get("name_ap"),
+                nobility=None,
+                title=_get("title_ap"),
+                role=_get("alt_label"),
+                party=None,
+                electoral_county=None
+            )
+
+        # Präsident(in)
         elif match.group("president"):
-            name = match.group("president")
-            role = "Präsident"
-            title = None
-            label = "Präsident"
+            speaker = Speaker(
+                begin=begin,
+                end=end,
+                label=_get("president"),
+                firstname=None,
+                name=_get("president"),
+                nobility=None,
+                title=None,
+                role=_get("president"),
+                party=None,
+                electoral_county=None
+            )
 
-        speakers.append(Speaker(
-            begin=begin,
-            end=end,
-            label=label,
-            firstname=None,
-            name=name,
-            title=title,
-            role=role,
-            party=None
-        ))
+        # Vizepräsident(in)
+        elif match.group("vicepresident"):
+            speaker = Speaker(
+                begin=begin,
+                end=end,
+                label=_get("vicepresident"),
+                firstname=None,
+                name=_get("name_vp"),
+                nobility=None,
+                title=_get("title_vp"),
+                role=_get("vicepresident"),
+                party=None,
+                electoral_county=None
+            )
 
-        next_match = next(pattern.finditer(text, end), None)
-        speech_end = next_match.start() if next_match else len(text)
+        # Staatsbeamter/BC branch
+        elif match.group("role_bc"):
+            speaker = Speaker(
+                begin=begin,
+                end=end,
+                label=_get("role_bc"),
+                firstname=None,
+                name=_get("name_bc"),
+                nobility=_get("nobility_bc"),
+                title=_get("title_bc"),
+                role="Staatsbeamter",
+                party=None,
+                electoral_county=None
+            )
+
+        speakers.append(speaker)
+
+        # Determine the speech text bounds
+        speech_start = end
+        speech_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
 
         speeches.append(Speech(
-            begin=end,
+            begin=speech_start,
             end=speech_end,
             speaker=len(speakers) - 1
         ))
 
     return DUUIResponse(
         speeches=speeches,
-        speakers=speakers
+        speakers=speakers,
     )
