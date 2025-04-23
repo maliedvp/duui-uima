@@ -1,19 +1,15 @@
-from pydantic import BaseModel
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List, Optional, Dict, Union
 import logging
-from time import time
+from cassis import load_typesystem
 from fastapi import FastAPI, Response
 from fastapi.encoders import jsonable_encoder
-from cassis import load_typesystem
-import time
+from pydantic import BaseModel
+from pydantic_settings import BaseSettings
 from starlette.responses import PlainTextResponse, JSONResponse
-import warnings
+from typing import List, Optional
 import re
 from mp import get_mp
 import pandas as pd
 import difflib
-
 
 class Settings(BaseSettings):
     # Name of this annotator
@@ -52,7 +48,6 @@ class Speaker(BaseModel):
     electoral_county: Optional[str] = None
     electoral_county_deducted: Optional[str] = None
 
-
 def find_mp(speaker: Speaker, mp_df: pd.DataFrame, threshold: float = 0.8) -> Speaker:
     """
     Enriches a Speaker object with party and electoral_county
@@ -84,7 +79,6 @@ def find_mp(speaker: Speaker, mp_df: pd.DataFrame, threshold: float = 0.8) -> Sp
     speaker.electoral_county_deducted = row.get("Wahlkreis") or None
     return speaker
 
-
 # Load settings from env vars
 settings = Settings()
 logging.basicConfig(level=settings.log_level)
@@ -95,8 +89,8 @@ typesystem_filename = '../resources/typesystem.xml'
 logger.debug("Loading typesystem from \"%s\"", typesystem_filename)
 with open(typesystem_filename, 'rb') as f:
     typesystem = load_typesystem(f)
-    logger.debug("Base typesystem:")
-    logger.debug(typesystem.to_xml())
+    # logger.debug("Base typesystem:")
+    # logger.debug(typesystem.to_xml())
 
 # Load the Lua communication script
 lua_communication_script_filename = "duui-parliament-segmenter.lua"
@@ -191,7 +185,7 @@ def get_documentation():
 def get_input_output() -> JSONResponse:
     json_item = {
         "inputs": [],
-        "outputs": []
+        "outputs": ["org.texttechnologylab.annotation.parliament.Speaker", "org.texttechnologylab.annotation.parliament.Speech"]
     }
 
     json_compatible_item_data = jsonable_encoder(json_item)
@@ -254,6 +248,119 @@ def post_process(request: DUUIRequest):
         )
         """,
         re.VERBOSE | re.MULTILINE
+    )
+
+    def _get(group: str) -> Optional[str]:
+        val = match.group(group)
+        if val is None:
+            return None
+        # strip leading/trailing whitespace
+        val = re.sub(r'^\s+|\s+$', '', val)
+        val = re.sub(r'\n', ' ', val)
+        return val if val else None
+
+    speeches: list[Speech] = []
+    speakers: list[Speaker] = []
+
+    matches = list(pattern.finditer(text))
+
+    for i, match in enumerate(matches):
+        begin, end = match.span()
+
+        # Standard Abgeordneter
+        if match.group("name"):
+            speaker = Speaker(
+                begin=begin,
+                end=end,
+                label=f"{_get('name')}, {_get('role')}",
+                firstname=_get("firstname"),
+                name=_get("name"),
+                nobility=_get("nobility"),
+                title=_get("title"),
+                role=_get("role"),
+                party=_get("party"),
+                electoral_county=_get("wkr")
+            )
+
+            speaker = find_mp(speaker=speaker, mp_df=mp_df)
+
+        # Alterspräsident(in)
+        elif match.group("alt_label"):
+            speaker = Speaker(
+                begin=begin,
+                end=end,
+                label=_get("alt_label"),
+                firstname=None,
+                name=_get("name_ap"),
+                nobility=None,
+                title=_get("title_ap"),
+                role=_get("alt_label"),
+                party=None,
+                electoral_county=None
+            )
+
+        # Präsident(in)
+        elif match.group("president"):
+            speaker = Speaker(
+                begin=begin,
+                end=end,
+                label=_get("president"),
+                firstname=None,
+                name=_get("president"),
+                nobility=None,
+                title=None,
+                role=_get("president"),
+                party=None,
+                electoral_county=None
+            )
+
+        # Vizepräsident(in)
+        elif match.group("vicepresident"):
+            speaker = Speaker(
+                begin=begin,
+                end=end,
+                label=_get("vicepresident"),
+                firstname=None,
+                name=_get("name_vp"),
+                nobility=None,
+                title=_get("title_vp"),
+                role=_get("vicepresident"),
+                party=None,
+                electoral_county=None
+            )
+
+        # Staatsbeamter/BC branch
+        elif match.group("role_bc"):
+            speaker = Speaker(
+                begin=begin,
+                end=end,
+                label=_get("role_bc"),
+                firstname=None,
+                name=_get("name_bc"),
+                nobility=_get("nobility_bc"),
+                title=_get("title_bc"),
+                role="Staatsbeamter",
+                party=None,
+                electoral_county=None
+            )
+
+        speakers.append(speaker)
+
+        # Determine the speech text bounds
+        speech_start = end
+        speech_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+
+
+        speeches.append(Speech(
+            begin=end,
+            end=speech_end,
+            speaker=len(speakers) - 1
+        ))
+
+    # Return data as JSON
+    return DUUIResponse(
+        speeches = speeches,
+        speakers = speakers
     )
 
     def _get(group: str) -> Optional[str]:

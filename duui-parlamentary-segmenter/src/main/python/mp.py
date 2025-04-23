@@ -2,7 +2,7 @@ import pandas as pd
 from nameparser import HumanName
 
 def get_mp(legislative_period:int):
-	# URLs der Wahlperioden 1–8
+    # URLs der Wahlperioden 1–8
     url = (
         "https://de.wikipedia.org/wiki/"
         f"Liste_der_Reichstagsabgeordneten_der_Weimarer_Republik_({legislative_period}._Wahlperiode)"
@@ -23,11 +23,11 @@ def get_mp(legislative_period:int):
         hn = HumanName(full)
 
         if hn.middle in ['Graf', 'Herzog', 'Freiherr']:
-        	nobility = hn.middle
-        	middle_name = None
+            nobility = hn.middle
+            middle_name = None
         else:
-        	middle_name = hn.middle
-        	nobility = None
+            middle_name = hn.middle
+            nobility = None
 
         return pd.Series({
             "title": hn.title or None,
