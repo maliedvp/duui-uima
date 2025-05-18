@@ -11,15 +11,15 @@ from mp import get_mp
 import pandas as pd
 import difflib
 
-class Settings(BaseSettings):
-    # Name of this annotator
-    annotator_name: str
-    # Version of this annotator
-    # TODO add these to the settings
-    annotator_version: str
-    # Log level
-    log_level: str
+from pydantic import BaseModel
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
+class Settings(BaseSettings):
+    annotator_name:    str
+    annotator_version: str
+    log_level:         str
+
+    # ← this line will now resolve correctly
     model_config = SettingsConfigDict(env_file=".env")
 
 
@@ -230,20 +230,14 @@ def post_process(request: DUUIRequest):
             :
         |
             (?P<trash_p>[^A-ZÄÖÜa-zäöüß]*) # trash
-            (?P<president>Präsident(?:in)?)\s*:
+            (?P<president>Präsident(?:in)?)\s*
+            (?P<name_p>[A-ZÄÖÜ][a-zäöüß\s]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)?)\s*  # Name
+            :
         |
             (?P<trash_vp>[^A-ZÄÖÜa-zäöüß]*) # trash
             (?P<vicepresident>Vizepräsident(?:in)?)\s*
             (?P<title_vp>[Dv]r\.|Prof\.)?\s*?  # Optional title
             (?P<name_vp>[A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)?)\s*  # Name
-            :
-        |
-            (?P<trash_bc>[^A-ZÄÖÜa-zäöüß]*) # trash
-            (?P<title_bc>[Dv]r\.|Prof\.)?\s*?  # Optional title
-            (?P<nobility_bc>(Graf)?\s?v?\.?)?\s*? # Optional nobility indication
-            (?P<name_bc>[A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)?)\s*  # Name
-            ,\s*?
-            (?P<role_bc>[^:]{,100}?)\s*  # Role
             :
         )
         """,
@@ -306,7 +300,7 @@ def post_process(request: DUUIRequest):
                 end=end,
                 label=_get("president"),
                 firstname=None,
-                name=_get("president"),
+                name=_get("name_p"),
                 nobility=None,
                 title=None,
                 role=_get("president"),

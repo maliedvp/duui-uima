@@ -1,10 +1,12 @@
+# https://www.reichstagsprotokolle.de/Band2_w2_bsb00000065.html
+
 # uvicorn duui-parliament-segmenter:app --reload
 
 import requests
 import re
 
-
-with open('1._Sitzung_27.05.1924.xmi.gz.txt', 'r') as file:
+# with open('/Users/marli453/develop/duui_files/1924/' + '1._Sitzung_27.05.1924.xmi.gz.txt', 'r') as file:
+with open('/Users/marli453/develop/duui_files/1924/' + '18._Sitzung_25.07.1924.xmi.gz.txt', 'r') as file:
 	text = file.read()
 
 # print(text)
