@@ -3,6 +3,7 @@ Class = luajava.bindClass("java.lang.Class")
 JCasUtil = luajava.bindClass("org.apache.uima.fit.util.JCasUtil")
 DUUILuaUtils = luajava.bindClass("org.texttechnologylab.DockerUnifiedUIMAInterface.lua.DUUILuaUtils")
 DocumentAnnotation = luajava.bindClass("org.texttechnologylab.annotation.DocumentAnnotation")
+Speaker = luajava.bindClass("org.texttechnologylab.annotation.parliament.Speaker")
 
 function serialize(inputCas, outputStream, parameters)
     --     print("start")
@@ -47,6 +48,16 @@ function deserialize(inputCas, inputStream)
         local _speech = luajava.newInstance("org.texttechnologylab.annotation.parliament.Speech", inputCas)
         _speech:setBegin(speech["begin"])
         _speech:setEnd(speech["end"])
+
+        local tSpeaker = results["speakers"][speech["speaker"]];
+
+        if(tSpeaker ~= nil) then
+            local pSpeaker = JCasUtil:selectAt(inputCas, Speaker, tSpeaker["begin"], tSpeaker["end"])
+            if (pSpeaker ~= nil and pSpeaker:size() > 0) then
+                _speech:setSpeaker(pSpeaker:getFirst())
+            end
+        end
+
         _speech:addToIndexes()
 
     end
