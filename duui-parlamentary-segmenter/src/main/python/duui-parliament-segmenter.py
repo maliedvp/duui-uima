@@ -106,6 +106,8 @@ class DUUIRequest(BaseModel):
     lang: str
     #
     text: str
+    #
+    subtitle: str
 
 # Documentation response
 class DUUIDocumentation(BaseModel):
@@ -199,7 +201,8 @@ def post_process(request: DUUIRequest):
     text = request.text
 
     # Get list of members of parliament for respective legislative period
-    mp_df = get_mp(legislative_period=2) # has to be adjusted
+    mp_df = get_mp(legislative_period=int(request.subtitle[:1])) # has to be adjusted
+    # mp_df = get_mp(legislative_period=2)
 
     # Improved regex pattern with anchors and optional parts
     pattern = re.compile(

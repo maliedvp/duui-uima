@@ -53,12 +53,12 @@ public class ParliamentarySegmenter {
     @Test
     public void test() throws Exception {
 
-        DUUIFileReaderLazy pFileReader = new DUUIFileReaderLazy("/home/gabrami/Downloads/WR", ".xmi.gz", 10);
+        DUUIFileReaderLazy pFileReader = new DUUIFileReaderLazy("/Users/marli453/develop/duui_files/export_2025_05_08", ".xmi.gz", 10);
 
         DUUIAsynchronousProcessor pProcessor = new DUUIAsynchronousProcessor(pFileReader);
 
         pComposer.add(
-                new DUUIRemoteDriver.Component("http://localhost:9714")
+                new DUUIRemoteDriver.Component("http://localhost:8000")
 //                new DUUIDockerDriver.Component("entailab.docker.texttechnologylab.org/duui-parliament-segmenter:0.1")
 //                        .withImageFetching()
                         .withScale(iWorkers)
@@ -66,7 +66,7 @@ public class ParliamentarySegmenter {
         );
 
         pComposer.add(new DUUIUIMADriver.Component(createEngineDescription(XmiWriter.class,
-                XmiWriter.PARAM_TARGET_LOCATION, "/tmp/",
+                XmiWriter.PARAM_TARGET_LOCATION, "/tmp/new/",
                 XmiWriter.PARAM_OVERWRITE, true,
                 XmiWriter.PARAM_VERSION, "1.1",
                 XmiWriter.PARAM_PRETTY_PRINT, true
@@ -81,7 +81,7 @@ public class ParliamentarySegmenter {
     @Test
     public void extractPlain() throws Exception {
 
-        DUUIFileReaderLazy pFileReader = new DUUIFileReaderLazy("/path", ".xmi.gz", 10);
+        DUUIFileReaderLazy pFileReader = new DUUIFileReaderLazy("/tmp/OldGermany/", ".xmi.gz", 10);
 
         DUUIAsynchronousProcessor pProcessor = new DUUIAsynchronousProcessor(pFileReader);
 

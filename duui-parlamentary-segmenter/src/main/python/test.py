@@ -7,14 +7,15 @@ import re
 
 # with open('/Users/marli453/develop/duui_files/1924/' + '1._Sitzung_27.05.1924.xmi.gz.txt', 'r') as file:
 with open('/Users/marli453/develop/duui_files/1924/' + '18._Sitzung_25.07.1924.xmi.gz.txt', 'r') as file:
-	text = file.read()
+    text = file.read()
 
 # print(text)
 
 response = requests.post("http://127.0.0.1:8000/v1/process", json={
     "doc_len": len(text),
     "lang": "de",
-    "text": text
+    "text": text,
+    "subtitle": "2. Wahlperiode"
 })
 
 # Print status and response for debugging
@@ -29,14 +30,20 @@ else:
 
 data = response.json()
 
-# Now access elements
-print("\n\nSpeeches:")
-for idx,speech in enumerate(data["speeches"]):
-	print(f"\t{speech}")
+print(data.keys())
 
-print("\n\nSpeakers:")
+# Now access elements
+no_speeches = len(data["speeches"])
+print(f"\n\nSpeeches: {no_speeches}")
+for idx,speech in enumerate(data["speeches"]):
+    if idx <= 5:
+        print(f"\t{speech}")
+
+len_speaker = len(data["speakers"])
+print(f"\n\nSpeakers: {len_speaker}")
 for idx,speaker in enumerate(data["speakers"]):
-	print(f"\t{speaker}")
+    if idx <= 5:
+        print(f"\t{speaker}")
 
 
 
