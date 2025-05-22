@@ -5,8 +5,8 @@
 import requests
 import re
 
-# with open('/Users/marli453/develop/duui_files/1924/' + '1._Sitzung_27.05.1924.xmi.gz.txt', 'r') as file:
-with open('/Users/marli453/develop/duui_files/1924/' + '18._Sitzung_25.07.1924.xmi.gz.txt', 'r') as file:
+with open('/Users/marli453/develop/duui_files/1924/' + '10._Sitzung_24.06.1924.xmi.gz.txt', 'r') as file:
+# with open('/Users/marli453/develop/duui_files/1924/' + '18._Sitzung_25.07.1924.xmi.gz.txt', 'r') as file:
     text = file.read()
 
 # print(text)
@@ -30,20 +30,36 @@ else:
 
 data = response.json()
 
-print(data.keys())
+# print(data.keys())
+no_speeches = len(data["speeches"])
+len_speaker = len(data["speakers"])
 
 # Now access elements
-no_speeches = len(data["speeches"])
 print(f"\n\nSpeeches: {no_speeches}")
 for idx,speech in enumerate(data["speeches"]):
     if idx <= 5:
         print(f"\t{speech}")
 
-len_speaker = len(data["speakers"])
+
 print(f"\n\nSpeakers: {len_speaker}")
 for idx,speaker in enumerate(data["speakers"]):
     if idx <= 5:
         print(f"\t{speaker}")
 
+
+# New output:
+if no_speeches == len_speaker:
+    for idx,speech in enumerate(data["speeches"]):
+        print(idx)
+        print(
+            'SPEAKER', 
+            data["speakers"][idx]['name'], '  |  ', data["speakers"][idx]['party'], '  |  ', data["speakers"][idx]['party_deducted'], '  |  ', data["speakers"][idx]['fullname_deducted'], '  |  ', data["speakers"][idx]['label']
+        )
+        speech_begin = data["speeches"][idx]['begin']
+        print('SPEECH', re.sub(r'\n','',text[speech_begin:speech_begin+50]))
+        print('--------------------------------------------')
+
+        # if idx ==5:
+        #     break
 
 

@@ -40,6 +40,7 @@ class Speaker(BaseModel):
     label: str
     firstname: Optional[str] = None
     name: Optional[str] = None
+    fullname_deducted: Optional[str] = None
     nobility: Optional[str] = None
     title: Optional[str] = None
     role: Optional[str] = None
@@ -48,7 +49,7 @@ class Speaker(BaseModel):
     electoral_county: Optional[str] = None
     electoral_county_deducted: Optional[str] = None
 
-def find_mp(speaker: Speaker, mp_df: pd.DataFrame, threshold: float = 0.8) -> Speaker:
+def find_mp(speaker: Speaker, mp_df: pd.DataFrame, threshold: float = 0.6) -> Speaker:
     """
     Enriches a Speaker object with party and electoral_county
     by matching speaker.name against mp_df.family_name,
@@ -63,18 +64,48 @@ def find_mp(speaker: Speaker, mp_df: pd.DataFrame, threshold: float = 0.8) -> Sp
     # 1) Exact match
     mask_exact = mp_df["family_name"].str.lower() == name_lower
     if mask_exact.any():
-        row = mp_df.loc[mask_exact].iloc[0]
+        exact_hits = mp_df.loc[mask_exact]
+
+        # --- NEW: if multiple exact last-name hits, disambiguate by party+WKR ---
+        if len(exact_hits) > 1:
+            # build key from the extracted speaker fields
+            key = " ".join(filter(None, [
+                speaker.party or "",
+                speaker.electoral_county or ""
+            ])).lower()
+
+            if key:
+                # compute a ratio for each candidate row
+                scores = exact_hits.apply(
+                    lambda row: difflib.SequenceMatcher(
+                        None,
+                        key,
+                        f"{row.get('Partei','')} {row.get('Wahlkreis','')}".lower()
+                    ).ratio(),
+                    axis=1
+                )
+                best_idx = scores.idxmax()
+                row = exact_hits.loc[best_idx]
+            else:
+                # no key to disambiguate on → just take the first
+                row = exact_hits.iloc[0]
+        else:
+            # exactly one hit → use it
+            row = exact_hits.iloc[0]
+
     else:
         # 2) Fuzzy fallback
         candidates = mp_df["family_name"].dropna().unique().tolist()
         closest = difflib.get_close_matches(speaker.name, candidates, n=1, cutoff=threshold)
         if not closest:
+            speaker.name = None
             speaker.party = None
             speaker.electoral_county = None
             return speaker
         mask_fuzzy = mp_df["family_name"].str.lower() == closest[0].lower()
         row = mp_df.loc[mask_fuzzy].iloc[0]
 
+    speaker.fullname_deducted = row.get("Abgeordneter") or None
     speaker.party_deducted = row.get("Partei") or None
     speaker.electoral_county_deducted = row.get("Wahlkreis") or None
     return speaker
@@ -201,30 +232,55 @@ def post_process(request: DUUIRequest):
     text = request.text
 
     # Get list of members of parliament for respective legislative period
-    mp_df = get_mp(legislative_period=int(request.subtitle[:1])) # has to be adjusted
-    # mp_df = get_mp(legislative_period=2)
+    mp_df = get_mp(legislative_period=int(request.subtitle[:1]))
 
     # Improved regex pattern with anchors and optional parts
     pattern = re.compile(
         r"""
         ^\s*
         (?:
-            (?P<trash1>[^A-ZÄÖÜa-zäöüß]*) # trash
-            (?P<firstname>[A-ZÄÖÜ]\.)?\s*? # Initial of first name
-            (?P<title>[Dv]r\.|Prof\.)?\s*?  # Optional title
-            (?P<nobility>(Graf)?(Freiherr)?\s?v?\.?)?\s*? # Optional nobility indication
-            (?P<name>[A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)?)\s*  # Name
             (?:
-              \(\s*(?P<party>[A-ZÄÖÜa-zäöüß]{,5})\s*\)   # “(Party)”
-              \s*,\s*                                 # comma + optional space
+                (?P<trash1>
+                    [^A-ZÄÖÜa-zäöüß]*
+                    |
+                    [A-Z]+
+                    |
+                    [a-z]+[A-Z]*
+                ) # trash
+            )?
+            (?P<firstname>[A-ZÄÖÜ]\.)?\s*? # Initial of first name
+            (?P<title>l\)r\.|Do\.|[Dv]r\.|Prof\.)?\s*?  # Optional title
+            (?P<nobility>(Graf)?(Graf\szu)?(Freiherr)?\s?v?\.?)?\s*? # Optional nobility indication
+            (?P<name>
+              [A-ZÄÖÜ][a-zäöüß]{2,}(?:-[A-ZÄÖÜ][a-zäöüß]+)*   # Mueller-Offried style
+              (?:                                         # optional second word
+                \s+[A-ZÄÖÜ][a-zäöüß]+(?:-[A-ZÄÖÜ][a-zäöüß]+)*
+              )?
+            )\s*
+            (?:
+              (?P<party_raw>
+                \(\s*[^\s]{1,5}\s*\)  # both parens
+              |
+                \(\s*[^\s]{1,5}       # only “(”
+              |
+                [^\s]{1,5}\)          # only “)”
+              )
+              \s*,?\s*                         # optional comma + spaces
             )?
             (?:
               \(\s*(?P<wkr>[A-ZÄÖÜa-zäöüß]{6,})\s*\)   # “(Wahlkreis)”
               \s*,\s*                                 # comma + optional space
             )?
-            (?P<trash2>.{,20}) # trash
-            (?P<role>Abgeordneter(?:in)?(?:,\sBerichterstatter)?)  # Role
-            :
+            (?P<trash2>.{,20}?) # trash
+            (?P<role>
+             (?:                               # “Abgeordneter” variants
+               Abgeordneter(?:in)?             #   Abgeordneter or Abgeordneterin
+             |
+               Abgeordnete                      #   Abgeordnete
+             )
+             (?:,\sBerichterstatter(?:in)?)?   # optional “, Berichterstatter” / “, Berichterstatterin”
+            )    
+            \s*:+
         |
             (?P<trash_ap>[^A-ZÄÖÜa-zäöüß]*) # trash
             (?P<alt_label>Alterspräsident(?:in)?)\s*
@@ -266,6 +322,9 @@ def post_process(request: DUUIRequest):
 
         # Standard Abgeordneter
         if match.group("name"):
+            raw = _get("party_raw")
+            party = raw.strip("()") if raw else None
+
             speaker = Speaker(
                 begin=begin,
                 end=end,
@@ -275,7 +334,7 @@ def post_process(request: DUUIRequest):
                 nobility=_get("nobility"),
                 title=_get("title"),
                 role=_get("role"),
-                party=_get("party"),
+                party=party,
                 electoral_county=_get("wkr")
             )
 
