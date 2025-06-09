@@ -116,7 +116,7 @@ logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger(__name__)
 
 # Load the predefined typesystem that is needed for this annotator to work
-typesystem_filename = '../resources/typesystem.xml'
+typesystem_filename = 'typesystem.xml'
 logger.debug("Loading typesystem from \"%s\"", typesystem_filename)
 with open(typesystem_filename, 'rb') as f:
     typesystem = load_typesystem(f)
@@ -413,11 +413,13 @@ def post_process(request: DUUIRequest):
             speaker=len(speakers) - 1
         ))
 
+
+
     # Return data as JSON
-    return DUUIResponse(
-        speeches = speeches,
-        speakers = speakers
-    )
+    # return DUUIResponse(
+    #     speeches = speeches,
+    #     speakers = speakers
+    # )
 
     def _get(group: str) -> Optional[str]:
         val = match.group(group)
@@ -522,7 +524,8 @@ def post_process(request: DUUIRequest):
         speeches.append(Speech(
             begin=speech_start,
             end=speech_end,
-            speaker=len(speakers) - 1
+            #speaker=len(speakers) - 1 # hierfür fehlt im Lua-Script noch eine Ergänzung; habe ich eingefügt.
+            speaker=len(speakers) # -1 brauchen wir nicht, zählen ab 1 nicht ab 0 :-)
         ))
 
     return DUUIResponse(
